@@ -18,21 +18,33 @@ variable "workspaces_namespace" {
   default     = "coder-workspaces"
 }
 
+variable "go_image" {
+  type        = string
+  description = "The container image for the Go environment."
+  default     = "mcr.microsoft.com/vscode/devcontainers/go:1"
+}
+
+variable "java_image" {
+  type        = string
+  description = "The container image for the Java environment."
+  default     = "mcr.microsoft.com/vscode/devcontainers/java"
+}
+
+variable "ubuntu_image" {
+  type        = string
+  description = "The container image for the Ubuntu environment."
+  default     = "mcr.microsoft.com/vscode/devcontainers/base:ubuntu"
+}
+
 provider "kubernetes" {
   config_path = "~/.kube/config"
 }
 
 data "coder_workspace" "me" {}
 
-resource "coder_agent" "go" {
-  os             = "linux"
-  arch           = "amd64"
-  dir            = "/home/vscode"
-  startup_script = <<EOF
+locals {
+  install_projector_script = <<EOF
     #!/bin/sh
-    curl -fsSL https://code-server.dev/install.sh | sh
-    code-server --auth none --port 13337 & 
-
     sudo apt-get update && sudo apt-get install -y python3 python3-pip
 
     # install projector
@@ -47,6 +59,19 @@ resource "coder_agent" "go" {
 
     echo 'access projector license terms'
     /home/vscode/.local/bin/projector --accept-license 2>&1 | tee -a projector.log
+  EOF
+}
+
+resource "coder_agent" "go" {
+  os             = "linux"
+  arch           = "amd64"
+  dir            = "/home/vscode"
+  startup_script = <<EOF
+    #!/bin/sh
+    curl -fsSL https://code-server.dev/install.sh | sh
+    code-server --auth none --port 13337 & 
+
+    ${local.install_projector_script}
 
     PROJECTOR_CONFIG_PATH=/home/vscode/.projector/configs/goland
 
@@ -75,22 +100,9 @@ resource "coder_agent" "java" {
   startup_script = <<EOF
     #!/bin/sh
     curl -fsSL https://code-server.dev/install.sh | sh
-    code-server --auth none --port 13337 &
+    code-server --auth none --port 13337 & 
 
-    sudo apt-get update && sudo apt-get install -y python3 python3-pip
-
-    # install projector
-    PROJECTOR_BINARY=/home/vscode/.local/bin/projector
-    if [ -f $PROJECTOR_BINARY ]; then
-        echo 'projector has already been installed - check for update'
-        /home/vscode/.local/bin/projector self-update 2>&1 | tee projector.log
-    else
-        echo 'installing projector'
-        pip3 install projector-installer --user 2>&1 | tee projector.log
-    fi
-
-    echo 'access projector license terms'
-    /home/vscode/.local/bin/projector --accept-license 2>&1 | tee -a projector.log
+    ${local.install_projector_script}
 
     PROJECTOR_CONFIG_PATH=/home/vscode/.projector/configs/intellij
 
@@ -182,7 +194,7 @@ variable "disk_size" {
 }
 
 resource "kubernetes_pod" "main" {
-  count = data.coder_workspace.me.start_count
+  count      = data.coder_workspace.me.start_count
   depends_on = [
     kubernetes_persistent_volume_claim.home-directory
   ]
@@ -197,7 +209,7 @@ resource "kubernetes_pod" "main" {
     }
     container {
       name    = "go"
-      image   = "mcr.microsoft.com/vscode/devcontainers/go:1"
+      image   = var.go_image
       command = ["sh", "-c", coder_agent.go.init_script]
       security_context {
         run_as_user = "1000"
@@ -217,7 +229,7 @@ resource "kubernetes_pod" "main" {
     }
     container {
       name    = "java"
-      image   = "mcr.microsoft.com/vscode/devcontainers/java"
+      image   = var.java_image
       command = ["sh", "-c", coder_agent.java.init_script]
       security_context {
         run_as_user = "1000"
@@ -237,7 +249,7 @@ resource "kubernetes_pod" "main" {
     }
     container {
       name    = "ubuntu"
-      image   = "mcr.microsoft.com/vscode/devcontainers/base:ubuntu"
+      image   = var.ubuntu_image
       command = ["sh", "-c", coder_agent.ubuntu.init_script]
       security_context {
         run_as_user = "1000"
@@ -257,7 +269,7 @@ resource "kubernetes_pod" "main" {
     }
     container {
       name    = "ubuntu-ephemeral"
-      image   = "mcr.microsoft.com/vscode/devcontainers/base:ubuntu"
+      image   = var.ubuntu_image
       command = ["sh", "-c", coder_agent.ubuntu-ephemeral.init_script]
       security_context {
         run_as_user = "1000"
